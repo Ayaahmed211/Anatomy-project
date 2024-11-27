@@ -1,0 +1,95 @@
+import numpy as np
+import cv2
+import mediapipe as mp
+import pygame
+import time
+
+def vector_angle_2d(v1, v2):
+    v1 = np.array(v1)
+    v2 = np.array(v2)
+    cos_theta = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
+    cos_theta = np.clip(cos_theta, -1.0, 1.0)
+    angle = np.arccos(cos_theta)
+    angle_degrees = np.degrees(angle)
+    return angle_degrees
+
+mp_pose = mp.solutions.pose
+pose = mp_pose.Pose()
+pygame.mixer.init()
+
+def play_audio(file):
+    pygame.mixer.music.load(file)
+    pygame.mixer.music.play()
+
+cap = cv2.VideoCapture(0)
+last_warning = False
+
+while cap.isOpened():
+    ret, frame = cap.read()
+    if not ret:
+        continue
+
+    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    results = pose.process(rgb_frame)
+
+    if results.pose_landmarks is not None:
+        landmarks = results.pose_landmarks.landmark
+
+        nose = [
+            landmarks[mp_pose.PoseLandmark.NOSE.value].x,
+            landmarks[mp_pose.PoseLandmark.NOSE.value].y
+        ]
+
+        left_shoulder = [
+            landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].x,
+            landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].y
+        ]
+
+        right_shoulder = [
+            landmarks[mp_pose.PoseLandmark.RIGHT_SHOULDER.value].x,
+            landmarks[mp_pose.PoseLandmark.RIGHT_SHOULDER.value].y
+        ]
+
+        neck = [
+            (left_shoulder[0] + right_shoulder[0]) / 2,
+            (left_shoulder[1] + right_shoulder[1]) / 2
+        ]
+
+        neck_to_nose_vector = [
+            nose[0] - neck[0],
+            nose[1] - neck[1]
+        ]
+
+        shoulder_vector = [
+            right_shoulder[0] - left_shoulder[0],
+            right_shoulder[1] - left_shoulder[1]
+        ]
+
+        vertical_vector = [0, -1]
+        horizontal_vector = [1, 0]
+
+        neck_flexion_angle = vector_angle_2d(neck_to_nose_vector, vertical_vector)
+        shoulder_angle = vector_angle_2d(shoulder_vector, horizontal_vector)
+
+        height, width, _ = frame.shape
+
+        if neck_flexion_angle > 15 or shoulder_angle < 170 or (abs(nose[1] - neck[1]) < (left_shoulder[0] - right_shoulder[0]) / 2):
+            if not last_warning:
+                play_audio("bad.mp3")
+                last_warning = True
+            cv2.putText(frame, "Watch out! Your neck might be stressed.",
+                        (int(width * 0.05), int(height * 0.9)),
+                        cv2.FONT_HERSHEY_COMPLEX, 0.8, (0, 0, 255), 2)
+        else:
+            last_warning = False
+            cv2.putText(frame, "Perfect alignment! Keep it up!",
+                        (int(width * 0.05), int(height * 0.9)),
+                        cv2.FONT_HERSHEY_COMPLEX, 0.8, (0, 255, 0), 2)
+
+    cv2.imshow("Posture Detection", frame)
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+cap.release()
+cv2.destroyAllWindows()
+pygame.mixer.quit()
